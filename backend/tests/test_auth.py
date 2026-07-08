@@ -2,7 +2,10 @@ import os
 
 # --- config crash bo'lmasligi uchun env'larni app importidan OLDIN o'rnatamiz ---
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://u:p@localhost/testdb")
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql+asyncpg://medicalka_test:medicalka_test@localhost:25432/medicalka_test",
+)
 os.environ.setdefault("JWT_ALGORITHM", "HS256")
 os.environ.setdefault("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
 os.environ.setdefault("REFRESH_TOKEN_EXPIRE_DAYS", "7")
@@ -12,23 +15,17 @@ os.environ.setdefault("CLEANUP_INTERVAL_SECONDS", "60")
 
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.pool import StaticPool
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.db import get_db
 from app.main import app
 from app.models import Base
-from app.db import get_db
 
 
-# --- Har bir test uchun toza in-memory SQLite baza + client ---
 @pytest_asyncio.fixture
 async def client():
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    engine = create_async_engine(os.environ["DATABASE_URL"])
     SessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
     # jadvallarni yaratamiz
@@ -71,10 +68,16 @@ async def test_register_success(client):
 # 2) Muvaffaqiyatsiz ro'yxatdan o'tish (dublikat email/username)
 @pytest.mark.asyncio
 async def test_register_duplicate(client):
-    r1 = await client.post("/auth/register", json=USER)
+    LOCAL_DUP_USER = {
+        "email": "unique_duplicate@example.com",
+        "username": "uniquedupuser",
+        "full_name": "Duplicate User Test",
+        "password": "secret123",
+    }
+    r1 = await client.post("/auth/register", json=LOCAL_DUP_USER)
     assert r1.status_code == 201
 
-    r2 = await client.post("/auth/register", json=USER)  # xuddi shu email/username
+    r2 = await client.post("/auth/register", json=LOCAL_DUP_USER)  # xuddi shu email/username
     assert r2.status_code == 400
 
 
