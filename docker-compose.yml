@@ -23,7 +23,6 @@ x-backend: &backend
       condition: service_healthy
     redis:
       condition: service_healthy
-
     tests:
       condition: service_completed_successfully
 
@@ -39,6 +38,10 @@ services:
     volumes:
       - ./backend:/code
     command: sh -c "pip install -q pytest pytest-asyncio aiosqlite && python -m pytest tests/ -v"
+
+    depends_on:
+      postgres_test:
+        condition: service_healthy
 
   postgres:
     restart: unless-stopped
@@ -59,6 +62,22 @@ services:
       timeout: 5s
       retries: 10
 
+  postgres_test:
+    restart: unless-stopped
+    image: postgres:18-trixie
+    container_name: medicalka_postgres_test
+    environment:
+      POSTGRES_DB: medicalka_test
+      POSTGRES_USER: medicalka_test
+      POSTGRES_PASSWORD: medicalka_test
+    ports:
+      - "25432:5432"
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medicalka_test -d medicalka_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:trixie
@@ -75,7 +94,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
 
   medicalka_server:
     <<: *backend
@@ -94,7 +112,6 @@ services:
     container_name: medicalka_beat
     command: celery -A app.celery_app:celery_app beat --loglevel=info
 
-
   frontend:
     build:
       context: ./frontend
@@ -105,7 +122,6 @@ services:
       - "5173:80"
     depends_on:
       - medicalka_server
-
 
 volumes:
   redis_data:
