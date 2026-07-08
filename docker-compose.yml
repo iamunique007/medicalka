@@ -1,0 +1,112 @@
+x-backend-env: &backend-env
+  DATABASE_URL: "postgresql+asyncpg://medicalka:medicalka@postgres:5432/medicalka"
+  CELERY_BROKER_URL: "redis://:medicalka@redis:6379/0"
+  CELERY_RESULT_BACKEND: "redis://:medicalka@redis:6379/1"
+  RATE_LIMIT_REDIS_URL: "redis://:medicalka@redis:6379/2"
+  SECRET_KEY: "7e2fa8b61c9e4b02ad3d56fcf4a542b10f84bc19b846de15c829e0132a4bf74d"
+  JWT_ALGORITHM: "HS256"
+  EMAIL_TOKEN_EXPIRE_MIN: "3"
+  REFRESH_TOKEN_EXPIRE_DAYS: "7"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+  UNVERIFIED_USER_TTL_MIN: "1"
+  CLEANUP_INTERVAL_SECONDS: "60"
+
+x-backend: &backend
+  build:
+    context: ./backend
+  restart: unless-stopped
+  image: medicalka_backend
+  environment:
+    <<: *backend-env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+    tests:
+      condition: service_completed_successfully
+
+services:
+  tests:
+    build:
+      context: ./backend
+    image: medicalka_backend
+    container_name: medicalka_tests
+    restart: "no"
+    environment:
+      <<: *backend-env
+    volumes:
+      - ./backend:/code
+    command: sh -c "pip install -q pytest pytest-asyncio aiosqlite && python -m pytest tests/ -v"
+
+  postgres:
+    restart: unless-stopped
+    image: postgres:18-trixie
+    container_name: medicalka_postgres
+    environment:
+      POSTGRES_DB: medicalka
+      POSTGRES_USER: medicalka
+      POSTGRES_PASSWORD: medicalka
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medicalka -d medicalka"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  redis:
+    image: redis:trixie
+    restart: unless-stopped
+    container_name: medicalka_redis
+    command: redis-server --appendonly yes --requirepass "medicalka"
+    ports:
+      - "16379:6379"
+    volumes:
+      - redis_data:/data
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "medicalka", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  medicalka_server:
+    <<: *backend
+    container_name: medicalka_server
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+
+  medicalka_worker:
+    <<: *backend
+    container_name: medicalka_worker
+    command: celery -A app.celery_app:celery_app worker --loglevel=info
+
+  medicalka_beat:
+    <<: *backend
+    container_name: medicalka_beat
+    command: celery -A app.celery_app:celery_app beat --loglevel=info
+
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    image: medicalka_frontend
+    container_name: medicalka_frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - medicalka_server
+
+
+volumes:
+  redis_data:
+  postgres_data:
